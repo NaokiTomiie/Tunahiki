@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>モーション綱引き対戦</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* カメラ映像の左右反転 */
+    #video-preview {
+      transform: scaleX(-1);
+    }
+    /* 綱引きのロープとフラッグのスタイル */
+    .rope-container {
+      background-image: repeating-linear-gradient(45deg, #e5e7eb, #e5e7eb 10px, #d1d5db 10px, #d1d5db 20px);
+    }
+    .rope {
+      background: repeating-linear-gradient(90deg, #8B4513, #8B4513 10px, #A0522D 10px, #A0522D 20px);
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+    #flag {
+      transition: left 0.1s linear;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+    }
+    /* メーターのトランジション */
+    .meter-bar {
+      transition: height 0.1s ease-out;
+    }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col font-sans select-none overflow-hidden">
+
+  <!-- ヘッダー -->
+  <header class="text-center py-4 bg-gray-800 shadow-md z-10">
+    <h1 class="text-2xl md:text-3xl font-bold text-yellow-400 tracking-wider">🔥 モーション綱引き 🔥</h1>
+    <p class="text-sm text-gray-300 mt-1">カメラの前で動いてロープを引け！</p>
+  </header>
+
+  <!-- メインコンテンツ -->
+  <main class="flex-1 flex flex-col items-center justify-center p-4 w-full max-w-4xl mx-auto relative">
+    
+    <!-- 状態表示パネル -->
+    <div id="status-panel" class="absolute inset-0 flex flex-col items-center justify-center z-20 bg-gray-900/80 backdrop-blur-sm transition-opacity duration-300">
+      <div class="bg-gray-800 p-8 rounded-2xl shadow-2xl text-center max-w-md w-full border border-gray-700">
+        <h2 id="message-title" class="text-3xl font-bold mb-4">準備はいいですか？</h2>
+        <p id="message-desc" class="text-gray-300 mb-6 leading-relaxed">
+          カメラを許可して、2人で左右に並んでください。<br>
+          自分の陣地（画面の左か右）で激しく動くと、ロープを自分のほうに引っ張ることができます！
+        </p>
+        <button id="start-btn" class="bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-bold py-3 px-8 rounded-full text-xl shadow-lg transform transition hover:scale-105 active:scale-95">
+          カメラを起動してスタート
+        </button>
+      </div>
+    </div>
+
+    <!-- カウントダウン表示 -->
+    <div id="countdown-display" class="absolute inset-0 flex items-center justify-center z-30 hidden pointer-events-none">
+      <span id="countdown-text" class="text-9xl font-black text-white drop-shadow-[0_0_20px_rgba(255,255,255,0.8)]">3</span>
+    </div>
+
+    <!-- カメラとモーション表示エリア -->
+    <div class="w-full flex flex-row items-center justify-center gap-2 md:gap-4 mb-6 relative">
+      <!-- プレイヤー1（左）の動きメーター -->
+      <div class="h-48 md:h-64 w-8 md:w-12 bg-gray-800 rounded-full overflow-hidden relative border-2 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]">
+        <div id="meter-left" class="meter-bar absolute bottom-0 left-0 w-full bg-gradient-to-t from-blue-700 to-blue-400 h-0"></div>
+        <div class="absolute inset-0 flex flex-col items-center justify-between py-2 text-xs font-bold text-blue-200">
+          <span>P1</span>
+        </div>
+      </div>
+
+      <!-- カメラプレビュー (自動再生制限回避のため muted を追加) -->
+      <div class="relative rounded-2xl overflow-hidden border-4 border-gray-700 shadow-2xl aspect-video w-full max-w-2xl bg-black">
+        <video id="video-preview" autoplay playsinline muted class="w-full h-full object-cover"></video>
+        <!-- 処理用キャンバス（非表示） -->
+        <canvas id="process-canvas" class="hidden"></canvas>
+        
+        <!-- 中央の境界線 -->
+        <div class="absolute top-0 bottom-0 left-1/2 w-1 bg-red-500/50 -ml-[0.5px] border-x border-red-900/30"></div>
+        
+        <!-- ラベル -->
+        <div class="absolute top-2 left-4 px-3 py-1 bg-blue-600/80 rounded-lg text-white font-bold text-sm backdrop-blur-sm">Player 1</div>
+        <div class="absolute top-2 right-4 px-3 py-1 bg-green-600/80 rounded-lg text-white font-bold text-sm backdrop-blur-sm">Player 2</div>
+      </div>
+
+      <!-- プレイヤー2（右）の動きメーター -->
+      <div class="h-48 md:h-64 w-8 md:w-12 bg-gray-800 rounded-full overflow-hidden relative border-2 border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.3)]">
+        <div id="meter-right" class="meter-bar absolute bottom-0 left-0 w-full bg-gradient-to-t from-green-700 to-green-400 h-0"></div>
+        <div class="absolute inset-0 flex flex-col items-center justify-between py-2 text-xs font-bold text-green-200">
+          <span>P2</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 綱引きエリア -->
+    <div class="w-full max-w-3xl relative mt-4">
+      <!-- 背景の地面 -->
+      <div class="rope-container w-full h-16 rounded-full border-4 border-gray-700 relative flex items-center justify-center">
+        <!-- 勝敗ライン（左） -->
+        <div class="absolute left-[10%] top-0 bottom-0 w-2 bg-blue-500/50 z-0"></div>
+        <!-- 勝敗ライン（右） -->
+        <div class="absolute right-[10%] top-0 bottom-0 w-2 bg-green-500/50 z-0"></div>
+        <!-- 中央ライン -->
+        <div class="absolute left-1/2 top-0 bottom-0 w-1 bg-yellow-500 z-0"></div>
+
+        <!-- ロープ本体 -->
+        <div class="rope absolute w-[120%] h-6 z-10 rounded-full"></div>
+        
+        <!-- センターフラッグ（これが動く） -->
+        <div id="flag" class="absolute z-20 w-8 h-16 bg-red-600 -mt-8 left-1/2 rounded-sm border-2 border-red-800 flex items-center justify-center">
+          <div class="w-2 h-full bg-red-800 opacity-50"></div>
+        </div>
+      </div>
+      
+      <!-- キャラクタアイコン（装飾） -->
+      <div class="flex justify-between w-full px-4 mt-4 text-4xl">
+        <div class="animate-bounce" style="animation-duration: 2s;">🏃‍♂️💨</div>
+        <div class="animate-bounce" style="animation-duration: 1.8s;">💨🏃‍♀️</div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // --- 定数と変数 ---
+    const GAME_STATE = {
+      IDLE: 0,
+      COUNTDOWN: 1,
+      PLAYING: 2,
+      FINISHED: 3
+    };
+
+    const CANVAS_WIDTH = 160;  // 処理負荷を下げるため低解像度
+    const CANVAS_HEIGHT = 120;
+    const MOTION_THRESHOLD = 40; // ピクセルの色の差の閾値（ノイズ対策）
+    const PULL_SENSITIVITY = 0.08; // 動きがロープの位置に与える影響度
+    const MAX_POSITION = 100; // 決着がつく位置（絶対値）
+
+    let currentState = GAME_STATE.IDLE;
+    let ropePosition = 0; // -100 (P1勝利) 〜 100 (P2勝利)
+    let previousImageData = null;
+    let animationFrameId = null;
+    let smoothedMoveL = 0;
+    let smoothedMoveR = 0;
+    let stream = null;
+
+    // --- DOM要素 ---
+    const video = document.getElementById('video-preview');
+    const canvas = document.getElementById('process-canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    
+    const startBtn = document.getElementById('start-btn');
+    const statusPanel = document.getElementById('status-panel');
+    const messageTitle = document.getElementById('message-title');
+    const messageDesc = document.getElementById('message-desc');
+    const countdownDisplay = document.getElementById('countdown-display');
+    const countdownText = document.getElementById('countdown-text');
+    
+    const flag = document.getElementById('flag');
+    const meterLeft = document.getElementById('meter-left');
+    const meterRight = document.getElementById('meter-right');
+
+    // キャンバスサイズ設定
+    canvas.width = CANVAS_WIDTH;
+    canvas.height = CANVAS_HEIGHT;
+    // previousImageDataの初期化
+    previousImageData = new Uint8ClampedArray(CANVAS_WIDTH * CANVAS_HEIGHT * 4);
+
+    // --- 関数 ---
+
+    // カメラの初期化 (段階的フォールバックにより接続エラーを確実に回避)
+    async function initCamera() {
+      // 試行するカメラの接続オプション一覧
+      // Invalid constraintエラーを防ぐため、一番単純な構造から順に試行します。
+      const constraintsList = [
+        // 1. 最も基本（ブラウザのデフォルトカメラをそのまま要求、追加の制約なし）
+        { video: true },
+        // 2. 音声を明示的に無効にしただけのもの
+        { video: true, audio: false },
+        // 3. インカメラの指定
+        { video: { facingMode: 'user' } },
+        // 4. 解像度の要望値（ideal）を含めた設定
+        { video: { width: { ideal: 640 }, height: { ideal: 480 } } }
+      ];
+
+      let lastError = null;
+
+      // 成功するまで設定を順に試す
+      for (const constraints of constraintsList) {
+        try {
+          console.log("カメラ接続を試行中: ", JSON.stringify(constraints));
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+          if (stream) {
+            console.log("カメラ接続に成功しました:", constraints);
+            break; // 接続に成功したためループを終了
+          }
+        } catch (err) {
+          console.warn("この設定でのカメラ接続に失敗しました:", constraints, err);
+          lastError = err;
+        }
+      }
+
+      // すべての設定が失敗した場合
+      if (!stream) {
+        console.error("すべてのカメラ設定の試行に失敗しました:", lastError);
+        alert("カメラへのアクセスに失敗しました。カメラの利用権限がブラウザで許可されているか確認してください。\n\n詳細: " + (lastError ? lastError.name + ": " + lastError.message : "Unknown Error"));
+        return false;
+      }
+
+      try {
+        video.srcObject = stream;
+        // iOSやAndroidの自動再生制限を突破するため明示的に再生を呼び出す
+        await video.play();
+        return true;
+      } catch (playErr) {
+        console.error("ビデオ再生に失敗しました:", playErr);
+        alert("カメラ映像の再生に失敗しました。ページをリロードしてもう一度お試しください。");
+        return false;
+      }
+    }
+
+    // ゲーム開始シーケンス
+    async function startGame() {
+      if (!stream) {
+        startBtn.textContent = "カメラを起動中...";
+        startBtn.disabled = true;
+        const success = await initCamera();
+        if (!success) {
+          startBtn.textContent = "カメラを起動してスタート";
+          startBtn.disabled = false;
+          return;
+        }
+      }
+
+      statusPanel.classList.add('opacity-0');
+      setTimeout(() => statusPanel.classList.add('hidden'), 300);
+
+      // 初期化
+      ropePosition = 0;
+      smoothedMoveL = 0;
+      smoothedMoveR = 0;
+      updateUI();
+      
+      // 最初の一枚を取得して初期化
+      captureAndFlipVideo();
+      const imgData = ctx.getImageData(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      previousImageData.set(imgData.data);
+
+      startCountdown();
+    }
+
+    // カウントダウン
+    function startCountdown() {
+      currentState = GAME_STATE.COUNTDOWN;
+      countdownDisplay.classList.remove('hidden');
+      
+      let count = 3;
+      countdownText.textContent = count;
+      
+      const interval = setInterval(() => {
+        count--;
+        if (count > 0) {
+          countdownText.textContent = count;
+        } else if (count === 0) {
+          countdownText.textContent = "START!";
+          countdownText.classList.add('text-red-500');
+        } else {
+          clearInterval(interval);
+          countdownDisplay.classList.add('hidden');
+          countdownText.classList.remove('text-red-500');
+          currentState = GAME_STATE.PLAYING;
+          gameLoop(); // ゲームループ開始
+        }
+      }, 1000);
+    }
+
+    // キャンバスにビデオ映像を反転して描画（鏡のようにするため）
+    function captureAndFlipVideo() {
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, -CANVAS_WIDTH, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.restore();
+    }
+
+    // モーション検知とロジック
+    function processMotion() {
+      captureAndFlipVideo();
+      const imageData = ctx.getImageData(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      const data = imageData.data;
+      
+      let moveL = 0;
+      let moveR = 0;
+      const halfWidth = CANVAS_WIDTH / 2;
+
+      // ピクセルごとの差分を計算
+      for (let y = 0; y < CANVAS_HEIGHT; y += 2) { // パフォーマンスのため2px飛ばし
+        for (let x = 0; x < CANVAS_WIDTH; x += 2) {
+          const i = (y * CANVAS_WIDTH + x) * 4;
+          
+          const rDiff = Math.abs(data[i] - previousImageData[i]);
+          const gDiff = Math.abs(data[i+1] - previousImageData[i+1]);
+          const bDiff = Math.abs(data[i+2] - previousImageData[i+2]);
+          
+          // 明るさの差分が閾値を超えたら「動いた」と判定
+          if ((rDiff + gDiff + bDiff) / 3 > MOTION_THRESHOLD) {
+            if (x < halfWidth) {
+              moveL++;
+            } else {
+              moveR++;
+            }
+          }
+        }
+      }
+
+      // 現在のフレームデータを保存
+      previousImageData.set(data);
+
+      // スムージング（ゲージの表示を滑らかにするため）
+      smoothedMoveL += (moveL - smoothedMoveL) * 0.3;
+      smoothedMoveR += (moveR - smoothedMoveR) * 0.3;
+
+      // 動きの差分からロープの位置を計算
+      // 右が動けばプラス方向(P2)、左が動けばマイナス方向(P1)
+      const diff = moveR - moveL;
+      ropePosition += diff * PULL_SENSITIVITY;
+
+      // 摩擦（少しずつ中央に戻る力）
+      ropePosition *= 0.995;
+
+      // 勝敗判定
+      if (ropePosition <= -MAX_POSITION) {
+        ropePosition = -MAX_POSITION;
+        finishGame(1);
+      } else if (ropePosition >= MAX_POSITION) {
+        ropePosition = MAX_POSITION;
+        finishGame(2);
+      }
+    }
+
+    // UIの更新
+    function updateUI() {
+      // フラッグの位置更新 (-100% ~ 100% を表示用に変換)
+      const visualPosition = 50 + (ropePosition / MAX_POSITION) * 40;
+      flag.style.left = `${visualPosition}%`;
+
+      // メーターの更新
+      const maxMotion = (CANVAS_WIDTH * CANVAS_HEIGHT / 4) * 0.3; // 想定最大ピクセル数
+      const leftPercent = Math.min(100, (smoothedMoveL / maxMotion) * 100);
+      const rightPercent = Math.min(100, (smoothedMoveR / maxMotion) * 100);
+      
+      meterLeft.style.height = `${leftPercent}%`;
+      meterRight.style.height = `${rightPercent}%`;
+      
+      // 優勢な方を光らせるなどの効果
+      if (ropePosition < -20) {
+        meterLeft.parentElement.classList.add('shadow-[0_0_30px_rgba(59,130,246,0.8)]');
+        meterRight.parentElement.classList.remove('shadow-[0_0_30px_rgba(34,197,94,0.8)]');
+      } else if (ropePosition > 20) {
+        meterLeft.parentElement.classList.remove('shadow-[0_0_30px_rgba(59,130,246,0.8)]');
+        meterRight.parentElement.classList.add('shadow-[0_0_30px_rgba(34,197,94,0.8)]');
+      } else {
+        meterLeft.parentElement.classList.remove('shadow-[0_0_30px_rgba(59,130,246,0.8)]');
+        meterRight.parentElement.classList.remove('shadow-[0_0_30px_rgba(34,197,94,0.8)]');
+      }
+    }
+
+    // メインループ
+    function gameLoop() {
+      if (currentState !== GAME_STATE.PLAYING) return;
+      
+      processMotion();
+      updateUI();
+      
+      animationFrameId = requestAnimationFrame(gameLoop);
+    }
+
+    // ゲーム終了処理
+    function finishGame(winner) {
+      currentState = GAME_STATE.FINISHED;
+      cancelAnimationFrame(animationFrameId);
+      
+      updateUI(); // 最終位置を描画
+
+      // 少し待ってから結果画面表示
+      setTimeout(() => {
+        statusPanel.classList.remove('hidden');
+        setTimeout(() => statusPanel.classList.remove('opacity-0'), 10);
+        
+        messageTitle.textContent = `🎊 Player ${winner} の勝利！ 🎊`;
+        messageTitle.className = `text-4xl font-bold mb-4 ${winner === 1 ? 'text-blue-400' : 'text-green-400'}`;
+        messageDesc.textContent = "もう一度対戦しますか？";
+        
+        startBtn.textContent = "もう一度プレイ";
+        startBtn.disabled = false;
+        startBtn.className = "bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-bold py-3 px-8 rounded-full text-xl shadow-[0_0_20px_rgba(234,179,8,0.5)] transform transition hover:scale-105 active:scale-95";
+      }, 1000);
+    }
+
+    // イベントリスナー
+    startBtn.addEventListener('click', startGame);
+
+  </script>
+</body>
+</html>
