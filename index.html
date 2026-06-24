@@ -58,6 +58,12 @@
       <span id="countdown-text" class="text-9xl font-black text-white drop-shadow-[0_0_20px_rgba(255,255,255,0.8)]">3</span>
     </div>
 
+    <!-- タイマー表示エリア (ゲームプレイ中に表示) -->
+    <div id="timer-container" class="mb-4 bg-gray-800/80 backdrop-blur-sm px-6 py-2 rounded-full border border-gray-700 shadow-lg text-center hidden">
+      <span class="text-xs text-gray-400 uppercase tracking-widest block font-bold">TIME LEFT</span>
+      <span id="timer-text" class="text-3xl font-mono font-bold text-yellow-400">30.0</span>
+    </div>
+
     <!-- カメラとモーション表示エリア -->
     <div class="w-full flex flex-row items-center justify-center gap-2 md:gap-4 mb-6 relative">
       <!-- プレイヤー1（左）の動きメーター -->
@@ -132,8 +138,9 @@
     const CANVAS_WIDTH = 160;  // 処理負荷を下げるため低解像度
     const CANVAS_HEIGHT = 120;
     const MOTION_THRESHOLD = 40; // ピクセルの色の差の閾値（ノイズ対策）
-    const PULL_SENSITIVITY = 0.04; // 動きがロープの位置に与える影響度
+    const PULL_SENSITIVITY = 0.04; // 動きがロープの位置に与える影響度（半減調整済み）
     const MAX_POSITION = 100; // 決着がつく位置（絶対値）
+    const GAME_DURATION = 30.0; // 制限時間（30秒）
 
     let currentState = GAME_STATE.IDLE;
     let ropePosition = 0; // -100 (P1勝利) 〜 100 (P2勝利)
@@ -142,6 +149,10 @@
     let smoothedMoveL = 0;
     let smoothedMoveR = 0;
     let stream = null;
+
+    // タイマー用変数
+    let timeLeft = GAME_DURATION;
+    let timerIntervalId = null;
 
     // --- DOM要素 ---
     const video = document.getElementById('video-preview');
@@ -155,6 +166,9 @@
     const countdownDisplay = document.getElementById('countdown-display');
     const countdownText = document.getElementById('countdown-text');
     
+    const timerContainer = document.getElementById('timer-container');
+    const timerText = document.getElementById('timer-text');
+
     const flag = document.getElementById('flag');
     const meterLeft = document.getElementById('meter-left');
     const meterRight = document.getElementById('meter-right');
@@ -169,7 +183,6 @@
 
     // カメラの初期化 (段階的フォールバックとデバイスID直接指定により接続エラーを確実に回避)
     async function initCamera() {
-      // 試行するカメラの接続オプション一覧
       const constraintsList = [
         { video: {} }, // 最もシンプルなオブジェクト
         { video: true }, // 基本的な有効化
@@ -263,6 +276,13 @@
       ropePosition = 0;
       smoothedMoveL = 0;
       smoothedMoveR = 0;
+      timeLeft = GAME_DURATION;
+      
+      // タイマーUIの表示＆設定
+      timerText.textContent = timeLeft.toFixed(1);
+      timerText.className = "text-3xl font-mono font-bold text-yellow-400";
+      timerContainer.classList.remove('hidden');
+      
       updateUI();
       
       // 最初の一枚を取得して初期化
@@ -292,10 +312,57 @@
           clearInterval(interval);
           countdownDisplay.classList.add('hidden');
           countdownText.classList.remove('text-red-500');
+          
+          // ゲーム本番開始
           currentState = GAME_STATE.PLAYING;
+          startTimer();
           gameLoop(); // ゲームループ開始
         }
       }, 1000);
+    }
+
+    // タイマー管理
+    function startTimer() {
+      // 100ミリ秒(0.1秒)ごとにタイマーを削減し滑らかに表示
+      timerIntervalId = setInterval(() => {
+        if (currentState !== GAME_STATE.PLAYING) {
+          clearInterval(timerIntervalId);
+          return;
+        }
+
+        timeLeft -= 0.1;
+        if (timeLeft <= 0) {
+          timeLeft = 0;
+          clearInterval(timerIntervalId);
+          
+          // 時間切れ時の常敗判定
+          resolveTimeUp();
+        }
+
+        // タイマーの更新
+        timerText.textContent = timeLeft.toFixed(1);
+
+        // 残り5秒以下のときに赤く点滅させる演出
+        if (timeLeft <= 5.0) {
+          timerText.className = "text-3xl font-mono font-bold text-red-500 animate-pulse";
+        }
+      }, 100);
+    }
+
+    // 時間切れ（30秒終了）時の勝敗判定
+    function resolveTimeUp() {
+      // ropePosition: -100(P1側最大) 〜 100(P2側最大)
+      // 完全に中央(0)なら引き分け。それ以外は綱が寄っている方の勝ち。
+      if (ropePosition < 0) {
+        // Player 1側に引き寄せられている
+        finishGame(1, true);
+      } else if (ropePosition > 0) {
+        // Player 2側に引き寄せられている
+        finishGame(2, true);
+      } else {
+        // 完全に真ん中
+        finishGame(0, true); // 引き分け
+      }
     }
 
     // キャンバスにビデオ映像を反転して描画（鏡のようにするため）
@@ -351,19 +418,20 @@
       // 摩擦（少しずつ中央に戻る力）
       ropePosition *= 0.995;
 
-      // 勝敗判定
+      // 即時勝敗判定 (30秒経つ前に端まで引いた場合)
       if (ropePosition <= -MAX_POSITION) {
         ropePosition = -MAX_POSITION;
-        finishGame(1);
+        finishGame(1, false);
       } else if (ropePosition >= MAX_POSITION) {
         ropePosition = MAX_POSITION;
-        finishGame(2);
+        finishGame(2, false);
       }
     }
 
     // UIの更新
     function updateUI() {
       // フラッグの位置更新 (-100% ~ 100% を表示用に変換)
+      // center-offset問題を防止するため、leftに「中央からの位置」を設定
       const visualPosition = 50 + (ropePosition / MAX_POSITION) * 40;
       flag.style.left = `${visualPosition}%`;
 
@@ -399,9 +467,12 @@
     }
 
     // ゲーム終了処理
-    function finishGame(winner) {
+    // winner: 1(P1), 2(P2), 0(引き分け)
+    // isTimeUp: 時間切れによる決着かどうか
+    function finishGame(winner, isTimeUp = false) {
       currentState = GAME_STATE.FINISHED;
       cancelAnimationFrame(animationFrameId);
+      if (timerIntervalId) clearInterval(timerIntervalId);
       
       updateUI(); // 最終位置を描画
 
@@ -410,9 +481,22 @@
         statusPanel.classList.remove('hidden');
         setTimeout(() => statusPanel.classList.remove('opacity-0'), 10);
         
-        messageTitle.textContent = `🎊 Player ${winner} の勝利！ 🎊`;
-        messageTitle.className = `text-4xl font-bold mb-4 ${winner === 1 ? 'text-blue-400' : 'text-green-400'}`;
-        messageDesc.textContent = "もう一度対戦しますか？";
+        let subMessage = "";
+        if (isTimeUp) {
+          subMessage = "⏱️ 30秒タイムアップ判定！\n";
+        } else {
+          subMessage = "💪 完全勝利！\n";
+        }
+
+        if (winner === 0) {
+          messageTitle.textContent = `🤝 DRAW (引き分け) 🤝`;
+          messageTitle.className = "text-4xl font-bold mb-4 text-yellow-400";
+          messageDesc.innerHTML = `${subMessage}両者一歩も譲らぬ大熱戦でした！`;
+        } else {
+          messageTitle.textContent = `🎊 Player ${winner} の勝利！ 🎊`;
+          messageTitle.className = `text-4xl font-bold mb-4 ${winner === 1 ? 'text-blue-400' : 'text-green-400'}`;
+          messageDesc.innerHTML = `${subMessage}${winner === 1 ? 'Player 1 (左)' : 'Player 2 (右)'} の動きが相手を上回りました！`;
+        }
         
         startBtn.textContent = "もう一度プレイ";
         startBtn.disabled = false;
