@@ -106,7 +106,7 @@
         <div class="rope absolute w-[120%] h-6 z-10 rounded-full"></div>
         
         <!-- センターフラッグ（これが動く） -->
-        <div id="flag" class="absolute z-20 w-8 h-16 bg-red-600 -mt-8 left-1/2 rounded-sm border-2 border-red-800 flex items-center justify-center">
+        <div id="flag" class="absolute z-20 w-8 h-16 bg-red-600 -mt-8 left-1/2 -translate-x-1/2 rounded-sm border-2 border-red-800 flex items-center justify-center">
           <div class="w-2 h-full bg-red-800 opacity-50"></div>
         </div>
       </div>
@@ -132,7 +132,7 @@
     const CANVAS_WIDTH = 160;  // 処理負荷を下げるため低解像度
     const CANVAS_HEIGHT = 120;
     const MOTION_THRESHOLD = 40; // ピクセルの色の差の閾値（ノイズ対策）
-    const PULL_SENSITIVITY = 0.08; // 動きがロープの位置に与える影響度
+    const PULL_SENSITIVITY = 0.04; // 動きがロープの位置に与える影響度
     const MAX_POSITION = 100; // 決着がつく位置（絶対値）
 
     let currentState = GAME_STATE.IDLE;
@@ -167,35 +167,60 @@
 
     // --- 関数 ---
 
-    // カメラの初期化 (段階的フォールバックにより接続エラーを確実に回避)
+    // カメラの初期化 (段階的フォールバックとデバイスID直接指定により接続エラーを確実に回避)
     async function initCamera() {
       // 試行するカメラの接続オプション一覧
-      // Invalid constraintエラーを防ぐため、一番単純な構造から順に試行します。
       const constraintsList = [
-        // 1. 最も基本（ブラウザのデフォルトカメラをそのまま要求、追加の制約なし）
-        { video: true },
-        // 2. 音声を明示的に無効にしただけのもの
-        { video: true, audio: false },
-        // 3. インカメラの指定
-        { video: { facingMode: 'user' } },
-        // 4. 解像度の要望値（ideal）を含めた設定
-        { video: { width: { ideal: 640 }, height: { ideal: 480 } } }
+        { video: {} }, // 最もシンプルなオブジェクト
+        { video: true }, // 基本的な有効化
+        { video: { facingMode: 'user' } }, // フロントカメラ優先
+        { video: { width: { ideal: 640 }, height: { ideal: 480 } } } // 低解像度指定
       ];
 
       let lastError = null;
 
-      // 成功するまで設定を順に試す
+      // 1. 通常のリストをループして試行
       for (const constraints of constraintsList) {
         try {
           console.log("カメラ接続を試行中: ", JSON.stringify(constraints));
           stream = await navigator.mediaDevices.getUserMedia(constraints);
           if (stream) {
             console.log("カメラ接続に成功しました:", constraints);
-            break; // 接続に成功したためループを終了
+            break;
           }
         } catch (err) {
           console.warn("この設定でのカメラ接続に失敗しました:", constraints, err);
           lastError = err;
+        }
+      }
+
+      // 2. すべて失敗した場合、デバイス一覧から直接利用可能なビデオデバイスのIDを取得して接続を試行
+      if (!stream && navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+        try {
+          console.log("デバイス一覧を取得して直接接続を試みます...");
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoDevices = devices.filter(device => device.kind === 'videoinput');
+          
+          if (videoDevices.length > 0) {
+            for (const device of videoDevices) {
+              try {
+                const directConstraints = { 
+                  video: { deviceId: device.deviceId } 
+                };
+                console.log("デバイスID直接指定で試行中:", device.label || device.deviceId);
+                stream = await navigator.mediaDevices.getUserMedia(directConstraints);
+                if (stream) {
+                  console.log("デバイスID指定での接続に成功しました");
+                  break;
+                }
+              } catch (directErr) {
+                console.warn("デバイスID指定での接続に失敗しました:", directErr);
+                lastError = directErr;
+              }
+            }
+          }
+        } catch (enumErr) {
+          console.error("デバイス一覧の取得に失敗しました:", enumErr);
         }
       }
 
