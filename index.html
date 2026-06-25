@@ -19,23 +19,6 @@
         .pulse-win {
             animation: pulse-soft 1s infinite;
         }
-        /* 綱引きキャラクターのアニメーション */
-        @keyframes pull-shake-p1 {
-            0%, 100% { transform: translate(-50%, -50%) rotate(0deg) scaleX(-1); }
-            25% { transform: translate(-50%, -50%) rotate(-15deg) scaleX(-1); }
-            75% { transform: translate(-50%, -50%) rotate(15deg) scaleX(-1); }
-        }
-        @keyframes pull-shake-p2 {
-            0%, 100% { transform: translate(-50%, -50%) rotate(0deg); }
-            25% { transform: translate(-50%, -50%) rotate(-15deg); }
-            75% { transform: translate(-50%, -50%) rotate(15deg); }
-        }
-        .anim-pull-p1 {
-            animation: pull-shake-p1 0.3s infinite ease-in-out;
-        }
-        .anim-pull-p2 {
-            animation: pull-shake-p2 0.3s infinite ease-in-out;
-        }
     </style>
 </head>
 <body class="bg-slate-900 text-white min-h-screen flex flex-col justify-between overflow-x-hidden font-sans">
@@ -62,11 +45,11 @@
                 <!-- 背景の円 -->
                 <svg class="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
                     <circle cx="50" cy="50" r="45" fill="none" stroke="#334155" stroke-width="8"></circle>
-                    <!-- 時間に合わせて減っていく円（初期色を赤に変更） -->
-                    <circle id="timerCircle" cx="50" cy="50" r="45" fill="none" stroke="#ef4444" stroke-width="8" stroke-dasharray="283" stroke-dashoffset="0" class="transition-all duration-100 ease-linear"></circle>
+                    <!-- 時間に合わせて減っていく円 -->
+                    <circle id="timerCircle" cx="50" cy="50" r="45" fill="none" stroke="#eab308" stroke-width="8" stroke-dasharray="283" stroke-dashoffset="0" class="transition-all duration-100 ease-linear"></circle>
                 </svg>
                 <div class="absolute inset-0 flex items-center justify-center flex-col">
-                    <span id="timerText" class="text-3xl font-black font-mono text-red-500 transition-opacity duration-75">30</span>
+                    <span id="timerText" class="text-3xl font-black font-mono">30</span>
                 </div>
             </div>
         </div>
@@ -189,15 +172,6 @@
                     <div class="w-full h-1 bg-red-600"></div>
                     <div class="text-[10px] font-black text-slate-900">📍</div>
                     <div class="w-full h-1 bg-blue-600"></div>
-                </div>
-
-                <!-- 頑張って引っ張っているキャラクター P1 -->
-                <div id="p1Character" class="absolute top-1/2 text-4xl transition-all duration-100 z-20 drop-shadow-lg" style="left: calc(50% - 40px); transform: translate(-50%, -50%) scaleX(-1);">
-                    🥵
-                </div>
-                <!-- 頑張って引っ張っているキャラクター P2 -->
-                <div id="p2Character" class="absolute top-1/2 text-4xl transition-all duration-100 z-20 drop-shadow-lg" style="left: calc(50% + 40px); transform: translate(-50%, -50%);">
-                    🥵
                 </div>
 
                 <!-- 左端のゴールライン (レッドゾーン) -->
@@ -344,9 +318,6 @@
         const sensitivityInput = document.getElementById('sensitivity');
         const showMotionInput = document.getElementById('showMotion');
         const resetPositionBtn = document.getElementById('resetPositionBtn');
-        
-        const p1Character = document.getElementById('p1Character');
-        const p2Character = document.getElementById('p2Character');
 
         const timerContainer = document.getElementById('timerContainer');
         const timerCircle = document.getElementById('timerCircle');
@@ -430,11 +401,6 @@
                     gameOverlay.classList.add('hidden');
                     isCountingDown = false;
                     gameActive = true;
-                    
-                    // 引っ張るアニメーションを開始
-                    p1Character.classList.add('anim-pull-p1');
-                    p2Character.classList.add('anim-pull-p2');
-                    
                     startGameTimer(); // 試合開始と同時にタイマースタート
                 }
             }, 1000);
@@ -458,8 +424,8 @@
             lastTickTime = Math.ceil(timeRemaining);
             updateTimerUI();
             timerContainer.classList.remove('hidden');
-            timerCircle.setAttribute('stroke', '#ef4444'); // 赤色
-            timerText.classList.add('text-red-500');
+            timerCircle.setAttribute('stroke', '#eab308'); // 通常時は黄色
+            timerText.classList.remove('text-red-500');
 
             timerInterval = setInterval(() => {
                 if(!gameActive) {
@@ -477,13 +443,13 @@
                 } else {
                     updateTimerUI();
                     
-                    // 残り5秒以下で1秒ごとに音を鳴らし、数字を点滅させる
+                    // 残り5秒以下で1秒ごとに音を鳴らす＆赤くする
                     let currentCeil = Math.ceil(timeRemaining);
                     if (currentCeil <= 5 && currentCeil !== lastTickTime) {
                         sfx.playTick();
                         lastTickTime = currentCeil;
-                        timerText.style.opacity = '0.3';
-                        setTimeout(() => { timerText.style.opacity = '1'; }, 150);
+                        timerCircle.setAttribute('stroke', '#ef4444');
+                        timerText.classList.add('text-red-500');
                     }
                 }
             }, 100);
@@ -554,7 +520,7 @@
                                 // 論理座標：
                                 // x < width/2 なら左（画面左＝プレイヤー1）
                                 // x >= width/2 なら右（画面右＝プレイヤー2）
-                                if (x < width / 2) {
+                                if (x >= width / 2) {
                                     p1MotionSum += diff;
                                     
                                     if (debugFrame) {
@@ -597,10 +563,8 @@
                 // 動きの総合値をスケール調整しUIに反映
                 // 画面解像度とサンプリング数に基づきパーセンテージに換算
                 const maxExpectedMotion = (width * height / 16) * 15; // スケーリング定数
-                
-                // パワーを3倍にして反映 (上限は100)
-                const p1Intensity = Math.min(100, Math.floor((p1MotionSum / maxExpectedMotion) * 100 * 3));
-                const p2Intensity = Math.min(100, Math.floor((p2MotionSum / maxExpectedMotion) * 100 * 3));
+                const p1Intensity = Math.min(100, Math.floor((p1MotionSum / maxExpectedMotion) * 100));
+                const p2Intensity = Math.min(100, Math.floor((p2MotionSum / maxExpectedMotion) * 100));
 
                 updateIntensityBars(p1Intensity, p2Intensity);
 
@@ -659,10 +623,6 @@
             // 中央インジケーター（リボン）の位置変更
             tugRopeFlag.style.left = `${ropePosition}%`;
             
-            // 引っ張るキャラクターの位置変更
-            p1Character.style.left = `calc(${ropePosition}% - 40px)`;
-            p2Character.style.left = `calc(${ropePosition}% + 40px)`;
-            
             // 引っ張り度合いに合わせて背景グラデーションを傾ける
             powerGradient.style.background = `linear-gradient(to right, #ef4444 ${ropePosition}%, #3b82f6 ${ropePosition}%)`;
         }
@@ -670,11 +630,6 @@
         // ゲームセット
         function endGame(winnerName, isTimeUp = false) {
             gameActive = false;
-            
-            // アニメーションを停止
-            p1Character.classList.remove('anim-pull-p1');
-            p2Character.classList.remove('anim-pull-p2');
-            
             if(timerInterval) clearInterval(timerInterval);
             sfx.playVictory();
 
